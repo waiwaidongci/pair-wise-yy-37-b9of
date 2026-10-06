@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-from .domain import (ConflictError, DomainError, NotFoundError, PermissionDenied,
-                     ValidationError)
+from .domain import (CapacityConflictError, ConflictError, DomainError,
+                     NotFoundError, PermissionDenied, ValidationError)
 from .service import Service
 
 
@@ -57,6 +57,15 @@ def make_handler(service: Service, static_dir: str):
             return value
 
         def _send_error(self, exc: Exception) -> None:
+            if isinstance(exc, CapacityConflictError):
+                self._json(409, {
+                    "error": "CapacityConflictError",
+                    "message": str(exc),
+                    "remaining": exc.remaining,
+                    "total": exc.total,
+                    "slot": exc.slot,
+                })
+                return
             if isinstance(exc, ValidationError):
                 status = 422
             elif isinstance(exc, NotFoundError):
@@ -98,6 +107,37 @@ def make_handler(service: Service, static_dir: str):
                     actor, role = self._identity()
                     del actor
                     self._json(200, {"events": service.audit(role)})
+                elif path == "/api/facilities":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"facilities": service.list_facilities(role)})
+                elif path.startswith("/api/facilities/") and path.endswith("/basis"):
+                    facility_id = int(path.split("/")[3])
+                    actor, role = self._identity()
+                    kind = parse_qs(urlparse(self.path).query).get("kind", [None])[0]
+                    self._json(200, {"basis": service.list_basis(facility_id, role, kind)})
+                elif path.startswith("/api/facilities/") and path.endswith("/capacity"):
+                    facility_id = int(path.split("/")[3])
+                    actor, role = self._identity()
+                    slot = parse_qs(urlparse(self.path).query).get("slot", [None])[0]
+                    self._json(200, service.get_capacity_board(facility_id, slot, role))
+                elif path.startswith("/api/facilities/") and path.endswith("/boards"):
+                    facility_id = int(path.split("/")[3])
+                    actor, role = self._identity()
+                    self._json(200, {"boards": service.list_boards(role, facility_id)})
+                elif path.startswith("/api/facilities/") and path.endswith("/instructions"):
+                    facility_id = int(path.split("/")[3])
+                    actor, role = self._identity()
+                    status = parse_qs(urlparse(self.path).query).get("status", [None])[0]
+                    self._json(200, {"instructions": service.list_instructions(facility_id, role, status)})
+                elif path.startswith("/api/facilities/"):
+                    facility_id = int(path.rsplit("/", 1)[-1])
+                    actor, role = self._identity()
+                    self._json(200, service.get_facility(facility_id, role))
+                elif path.startswith("/api/batches/"):
+                    batch_key = path.rsplit("/", 1)[-1]
+                    actor, role = self._identity()
+                    self._json(200, service.get_batch(batch_key, role))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
@@ -119,6 +159,24 @@ def make_handler(service: Service, static_dir: str):
                     expected = body.get("expected_version")
                     self._json(200, service.transition(
                         item_id, target, expected, actor, role))
+                elif path == "/api/facilities":
+                    self._json(201, service.create_facility(body, actor, role))
+                elif path == "/api/facilities/migrate":
+                    self._json(200, service.migrate_pending_verification(actor, role))
+                elif path.startswith("/api/facilities/") and path.endswith("/basis"):
+                    facility_id = int(path.split("/")[3])
+                    self._json(201, service.record_basis(facility_id, body, actor, role))
+                elif path.startswith("/api/facilities/") and path.endswith("/seize"):
+                    facility_id = int(path.split("/")[3])
+                    self._json(200, service.seize_capacity(facility_id, body, actor, role))
+                elif path == "/api/batches":
+                    self._json(201, service.submit_batch(body, actor, role))
+                elif path.startswith("/api/batches/") and path.endswith("/recover"):
+                    batch_key = path.split("/")[3]
+                    self._json(200, service.recover_batch(batch_key, actor, role))
+                elif path.startswith("/api/basis/") and path.endswith("/conclusion"):
+                    basis_id = int(path.split("/")[3])
+                    self._json(200, service.update_basis_conclusion(basis_id, body, actor, role))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:

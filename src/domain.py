@@ -10,6 +10,14 @@ class ValidationError(DomainError): kind=ErrorKind.VALIDATION
 class NotFoundError(DomainError): kind=ErrorKind.NOT_FOUND
 class PermissionDenied(DomainError): kind=ErrorKind.FORBIDDEN
 class ConflictError(DomainError): kind=ErrorKind.CONFLICT
+class CapacityConflictError(ConflictError):
+    """容量不足冲突，携带剩余容量供后到者查看。"""
+    def __init__(self, message, *, remaining=None, total=None, slot=None):
+        super().__init__(message)
+        self.remaining=remaining; self.total=total; self.slot=slot
+class DispatchWriteError(Exception):
+    """调度写入过程中的内部失败（用于按批次恢复场景）。"""
+    pass
 SEVERITIES=['low', 'medium', 'high', 'critical']; STATES=['draft', 'submitted', 'inspection', 'correction', 'approved']; ROLES=['applicant', 'inspector', 'compliance_manager', 'viewer']
 @dataclass(frozen=True)
 class Item:
