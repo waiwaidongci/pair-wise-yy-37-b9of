@@ -8,10 +8,11 @@ from urllib.parse import parse_qs, urlparse
 
 from .domain import (ConflictError, DomainError, NotFoundError, PermissionDenied,
                      ValidationError)
+from .ledger_service import LedgerService
 from .service import Service
 
 
-def make_handler(service: Service, static_dir: str):
+def make_handler(service: Service, ledger: LedgerService, static_dir: str):
     root = Path(static_dir)
 
     class Handler(BaseHTTPRequestHandler):
@@ -98,6 +99,33 @@ def make_handler(service: Service, static_dir: str):
                     actor, role = self._identity()
                     del actor
                     self._json(200, {"events": service.audit(role)})
+                elif path == "/api/facilities":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"facilities": ledger.list_facilities(role)})
+                elif path == "/api/ledger":
+                    actor, role = self._identity()
+                    query = parse_qs(urlparse(self.path).query)
+                    def _one(name):
+                        return query[name][0] if name in query else None
+                    fid = _one("facility_id")
+                    self._json(200, ledger.ledger(
+                        role, int(fid) if fid else None,
+                        _one("from"), _one("to")))
+                elif path == "/api/directives":
+                    actor, role = self._identity()
+                    query = parse_qs(urlparse(self.path).query)
+                    def _one(name):
+                        return query[name][0] if name in query else None
+                    fid = _one("facility_id")
+                    self._json(200, {"directives": ledger.list_directives(
+                        role, int(fid) if fid else None, _one("status"))})
+                elif path == "/api/bases":
+                    actor, role = self._identity()
+                    query = parse_qs(urlparse(self.path).query)
+                    fid = query["facility_id"][0] if "facility_id" in query else None
+                    self._json(200, {"bases": ledger.list_bases(
+                        role, int(fid) if fid else None)})
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
@@ -119,6 +147,38 @@ def make_handler(service: Service, static_dir: str):
                     expected = body.get("expected_version")
                     self._json(200, service.transition(
                         item_id, target, expected, actor, role))
+                elif path == "/api/facilities":
+                    self._json(201, ledger.create_facility(body, actor, role))
+                elif path == "/api/plan/refresh":
+                    self._json(200, ledger.refresh_plan(body, actor, role))
+                elif path == "/api/dispatch":
+                    self._json(200, ledger.dispatch(body, actor, role))
+                elif path == "/api/legacy/import":
+                    self._json(201, ledger.legacy_import(body, actor, role))
+                elif (path.startswith("/api/facilities/")
+                      and path.endswith("/bases")
+                      and "/batches/" not in path
+                      and "/directives/" not in path):
+                    facility_id = int(path.split("/")[3])
+                    self._json(201, ledger.register_basis(
+                        facility_id, body, actor, role))
+                elif path.startswith("/api/bases/"):
+                    basis_id = int(path.rsplit("/", 1)[-1])
+                    self._json(200, ledger.update_basis(
+                        basis_id, body, actor, role))
+                elif path.startswith("/api/batches/") and path.endswith("/recover"):
+                    batch_id = int(path.split("/")[3])
+                    self._json(200, ledger.recover_batch(
+                        batch_id, body, actor, role))
+                elif path.startswith("/api/directives/") and path.endswith("/execute"):
+                    directive_id = int(path.split("/")[3])
+                    self._json(200, ledger.execute_directive(
+                        directive_id, actor, role))
+                elif (path.startswith("/api/directives/")
+                      and path.endswith("/supplement-basis")):
+                    directive_id = int(path.split("/")[3])
+                    self._json(200, ledger.supplement_basis(
+                        directive_id, body, actor, role))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:

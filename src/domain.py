@@ -10,6 +10,9 @@ class ValidationError(DomainError): kind=ErrorKind.VALIDATION
 class NotFoundError(DomainError): kind=ErrorKind.NOT_FOUND
 class PermissionDenied(DomainError): kind=ErrorKind.FORBIDDEN
 class ConflictError(DomainError): kind=ErrorKind.CONFLICT
+class CapacityConflictError(ConflictError):
+    def __init__(self,message,remaining=None,facility_id=None,slot_start=None):
+        super().__init__(message); self.remaining=remaining; self.facility_id=facility_id; self.slot_start=slot_start
 SEVERITIES=['low', 'medium', 'high', 'critical']; STATES=['draft', 'submitted', 'inspection', 'correction', 'approved']; ROLES=['applicant', 'inspector', 'compliance_manager', 'viewer']
 @dataclass(frozen=True)
 class Item:
